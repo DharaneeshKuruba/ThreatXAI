@@ -23,6 +23,26 @@ def get_feature_names():
 
 # ─── SHAP Engine ──────────────────────────────────────────────────────────────
 
+# Cached background dataset for DNN KernelExplainer
+_dnn_background = None
+
+
+def _get_dnn_background():
+    """Load and cache a small background dataset from training data for SHAP KernelExplainer."""
+    global _dnn_background
+    if _dnn_background is None:
+        bg_path = os.path.join(PROCESSED_DIR, "X_train.npy")
+        if os.path.exists(bg_path):
+            X_train = np.load(bg_path, allow_pickle=True)
+            # Sample 100 random instances as background
+            idx = np.random.choice(len(X_train), min(100, len(X_train)), replace=False)
+            _dnn_background = X_train[idx].astype(np.float32)
+            log.info(f"SHAP DNN background loaded: {_dnn_background.shape}")
+        else:
+            log.warning("X_train.npy not found — DNN SHAP explanations won't work")
+    return _dnn_background
+
+
 def compute_shap_values(model, X: np.ndarray, model_type: str = "xgboost") -> np.ndarray:
     """
     Returns SHAP values for X.
@@ -37,12 +57,15 @@ def compute_shap_values(model, X: np.ndarray, model_type: str = "xgboost") -> np
         if isinstance(shap_values, list):
             shap_values = shap_values[1]  # class=1 (attack)
     elif model_type == "dnn":
-        # Use background dataset (100 samples) for efficiency
-        bg = shap.sample(X, 100, random_state=42)
+        # Use cached background dataset (not the input instance!)
+        bg = _get_dnn_background()
+        if bg is None:
+            log.warning("No background data for DNN SHAP — returning zeros")
+            return np.zeros_like(X)
         explainer = shap.KernelExplainer(
             lambda x: model.predict(x, verbose=0).flatten(), bg
         )
-        shap_values = explainer.shap_values(X[:100], nsamples=50)  # limit for speed
+        shap_values = explainer.shap_values(X, nsamples=100)
     else:
         raise ValueError(f"Unknown model_type: {model_type}")
 

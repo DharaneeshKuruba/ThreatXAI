@@ -289,7 +289,7 @@ def _run_inference(features: np.ndarray, src_ip: str, dst_ip: str,
                 edac = get_edac_engine()
                 cluster_info = edac.assign_alert(shap_vector, alert_id)
         except Exception as e:
-            log.debug(f"SHAP/EDAC error: {e}")
+            log.warning(f"SHAP/EDAC error: {e}")
 
         if prediction == 1:
             _alerts_generated += 1
