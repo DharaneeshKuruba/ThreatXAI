@@ -1,10 +1,7 @@
-// pages/AlertDetail.jsx — Per-alert SHAP waterfall + LIME bar chart
+// pages/AlertDetail.jsx — Per-alert SHAP waterfall + LIME lollipop + Comparison view
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAlertDetail, explainSHAP, explainLIME } from '../api/client';
-import {
-    BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine
-} from 'recharts';
 
 const SAMPLE_ALERT = {
     alert_id: 'demo-alert-1',
@@ -43,6 +40,8 @@ const SAMPLE_ALERT = {
     ]
 };
 
+// ─── SHAP Waterfall Component ────────────────────────────────────────────────
+// Visual: Horizontal stacked bars showing additive contributions
 function SHAPWaterfall({ features }) {
     if (!features || features.length === 0) return null;
     const maxAbs = Math.max(...features.map(f => Math.abs(f[1])));
@@ -71,31 +70,197 @@ function SHAPWaterfall({ features }) {
     );
 }
 
-function LIMEChart({ features }) {
+// ─── LIME Lollipop Chart Component ───────────────────────────────────────────
+// Visual: Dot-on-stick lollipop chart — distinct from SHAP's filled bars
+function LIMELollipop({ features }) {
     if (!features || features.length === 0) return null;
     const data = features.map(f => ({
         name: f.feature || f[0],
         value: f.weight !== undefined ? f.weight : f[1],
     }));
+    const maxAbs = Math.max(...data.map(d => Math.abs(d.value)));
 
     return (
-        <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={data} layout="vertical" margin={{ left: 8, right: 20, top: 8, bottom: 8 }}>
-                <XAxis type="number" tickFormatter={v => v.toFixed(2)} />
-                <YAxis type="category" dataKey="name" width={200} tick={{ fontSize: 11, fill: 'var(--text-secondary)', fontFamily: 'JetBrains Mono' }} />
-                <Tooltip
-                    formatter={(v) => [v.toFixed(4), 'LIME Weight']}
-                    contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}
-                    labelStyle={{ color: 'var(--text-primary)' }}
-                />
-                <ReferenceLine x={0} stroke="rgba(255,255,255,0.1)" />
-                <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                    {data.map((d, i) => (
-                        <Cell key={i} fill={d.value > 0 ? '#ef4444' : '#06b6d4'} fillOpacity={0.85} />
-                    ))}
-                </Bar>
-            </BarChart>
-        </ResponsiveContainer>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {data.map((d, i) => {
+                const isPos = d.value > 0;
+                const pct = (d.value / maxAbs) * 50; // -50% to +50%
+                const dotColor = isPos ? '#a78bfa' : '#34d399';
+                const lineColor = isPos ? 'rgba(167,139,250,0.4)' : 'rgba(52,211,153,0.4)';
+
+                return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {/* Feature name */}
+                        <div style={{
+                            width: 200, minWidth: 200, fontSize: 11,
+                            fontFamily: 'JetBrains Mono, monospace',
+                            color: 'var(--text-secondary)',
+                            textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                        }} title={d.name}>{d.name}</div>
+
+                        {/* Lollipop track */}
+                        <div style={{
+                            flex: 1, height: 24, position: 'relative',
+                            background: 'rgba(255,255,255,0.02)',
+                            borderRadius: 4,
+                        }}>
+                            {/* Center line */}
+                            <div style={{
+                                position: 'absolute', left: '50%', top: 2, bottom: 2,
+                                width: 1, background: 'rgba(255,255,255,0.1)'
+                            }} />
+
+                            {/* Stick line */}
+                            <div style={{
+                                position: 'absolute',
+                                top: '50%', transform: 'translateY(-50%)',
+                                height: 2,
+                                background: lineColor,
+                                left: isPos ? '50%' : `${50 + pct}%`,
+                                width: `${Math.abs(pct)}%`,
+                            }} />
+
+                            {/* Dot */}
+                            <div style={{
+                                position: 'absolute',
+                                top: '50%', transform: 'translate(-50%, -50%)',
+                                left: `${50 + pct}%`,
+                                width: 10, height: 10,
+                                borderRadius: '50%',
+                                background: dotColor,
+                                boxShadow: `0 0 6px ${dotColor}80`,
+                            }} />
+                        </div>
+
+                        {/* Value */}
+                        <div style={{
+                            width: 65, fontSize: 11,
+                            fontFamily: 'JetBrains Mono, monospace',
+                            fontWeight: 600,
+                            color: dotColor,
+                            textAlign: 'right',
+                        }}>
+                            {isPos ? '+' : ''}{d.value.toFixed(4)}
+                        </div>
+                    </div>
+                );
+            })}
+            {/* Legend */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 20, marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                <span>🟣 Purple = pushes toward Attack</span>
+                <span>🟢 Green = pushes toward Benign</span>
+            </div>
+        </div>
+    );
+}
+
+// ─── Comparison View Component ───────────────────────────────────────────────
+// Shows both SHAP and LIME side-by-side with agreement indicators
+function ComparisonView({ shapFeatures, limeFeatures }) {
+    if (!shapFeatures || shapFeatures.length === 0) return null;
+
+    // Build a map of LIME features for lookup
+    const limeMap = {};
+    (limeFeatures || []).forEach(f => {
+        const name = f.feature || f[0];
+        const val = f.weight !== undefined ? f.weight : f[1];
+        // Match base feature name (LIME uses conditions like "SYN Flag Count > 2.5")
+        const baseName = name.split(/\s*[<>=!]+/)[0].trim();
+        limeMap[baseName] = val;
+    });
+
+    const shapMax = Math.max(...shapFeatures.map(f => Math.abs(f[1])));
+    const limeMax = Math.max(
+        ...Object.values(limeMap).map(v => Math.abs(v)),
+        0.001 // prevent division by zero
+    );
+
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
+                <div style={{ width: 160, fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Feature</div>
+                <div style={{ flex: 1, fontSize: 11, fontWeight: 700, color: '#f87171', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🎯 SHAP</div>
+                <div style={{ flex: 1, fontSize: 11, fontWeight: 700, color: '#a78bfa', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🔬 LIME</div>
+                <div style={{ width: 70, fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Match</div>
+            </div>
+
+            {shapFeatures.slice(0, 10).map(([name, shapVal], i) => {
+                const limeVal = limeMap[name] || 0;
+                const shapPct = (shapVal / shapMax) * 100;
+                const limePct = limeMax > 0 ? (limeVal / limeMax) * 100 : 0;
+                const sameSign = (shapVal >= 0 && limeVal >= 0) || (shapVal < 0 && limeVal < 0);
+                const hasLime = limeMap[name] !== undefined;
+
+                return (
+                    <div key={i} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0',
+                        borderBottom: '1px solid rgba(255,255,255,0.03)'
+                    }}>
+                        {/* Feature name */}
+                        <div style={{
+                            width: 160, minWidth: 160, fontSize: 11,
+                            fontFamily: 'JetBrains Mono, monospace',
+                            color: 'var(--text-secondary)',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                        }} title={name}>{name}</div>
+
+                        {/* SHAP bar */}
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <div style={{ flex: 1, height: 14, background: 'rgba(255,255,255,0.03)', borderRadius: 3, position: 'relative', overflow: 'hidden' }}>
+                                <div style={{
+                                    position: 'absolute', top: 0, bottom: 0, borderRadius: 3,
+                                    background: shapVal > 0
+                                        ? 'linear-gradient(90deg, rgba(248,113,113,0.3), rgba(248,113,113,0.7))'
+                                        : 'linear-gradient(270deg, rgba(103,232,249,0.3), rgba(103,232,249,0.7))',
+                                    width: `${Math.abs(shapPct)}%`,
+                                    ...(shapVal > 0 ? { left: 0 } : { right: 0 })
+                                }} />
+                            </div>
+                            <span style={{ fontSize: 10, fontFamily: 'JetBrains Mono', color: shapVal > 0 ? '#f87171' : '#67e8f9', width: 50, textAlign: 'right' }}>
+                                {shapVal > 0 ? '+' : ''}{shapVal.toFixed(3)}
+                            </span>
+                        </div>
+
+                        {/* LIME bar */}
+                        <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <div style={{ flex: 1, height: 14, background: 'rgba(255,255,255,0.03)', borderRadius: 3, position: 'relative', overflow: 'hidden' }}>
+                                {hasLime && <div style={{
+                                    position: 'absolute', top: 0, bottom: 0, borderRadius: 3,
+                                    background: limeVal > 0
+                                        ? 'linear-gradient(90deg, rgba(167,139,250,0.3), rgba(167,139,250,0.7))'
+                                        : 'linear-gradient(270deg, rgba(52,211,153,0.3), rgba(52,211,153,0.7))',
+                                    width: `${Math.abs(limePct)}%`,
+                                    ...(limeVal > 0 ? { left: 0 } : { right: 0 })
+                                }} />}
+                            </div>
+                            <span style={{ fontSize: 10, fontFamily: 'JetBrains Mono', color: hasLime ? (limeVal > 0 ? '#a78bfa' : '#34d399') : 'var(--text-muted)', width: 50, textAlign: 'right' }}>
+                                {hasLime ? `${limeVal > 0 ? '+' : ''}${limeVal.toFixed(3)}` : '—'}
+                            </span>
+                        </div>
+
+                        {/* Agreement indicator */}
+                        <div style={{ width: 70, textAlign: 'center', fontSize: 13 }}>
+                            {!hasLime ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>N/A</span>
+                                : sameSign ? <span title="Both methods agree on direction">✅ Agree</span>
+                                : <span title="Methods disagree on direction">⚠️ Split</span>}
+                        </div>
+                    </div>
+                );
+            })}
+
+            {/* Summary */}
+            <div style={{
+                marginTop: 12, padding: '10px 14px',
+                background: 'rgba(99,102,241,0.06)',
+                border: '1px solid rgba(99,102,241,0.15)',
+                borderRadius: 8, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6
+            }}>
+                💡 <strong>Interpretation:</strong> When SHAP and LIME agree (✅), the explanation is highly reliable.
+                When they disagree (⚠️), the model's decision boundary is complex in that region — examine both perspectives.
+                SHAP provides <em>global consistency</em> (game-theory based), LIME provides <em>local fidelity</em> (neighborhood sampling).
+            </div>
+        </div>
     );
 }
 
@@ -183,22 +348,28 @@ export default function AlertDetail() {
                     </div>
                 )}
 
-                {/* SHAP / LIME Tabs */}
+                {/* SHAP / LIME / Comparison Tabs */}
                 <div className="card">
                     <div className="tabs">
                         <button className={`tab ${tab === 'shap' ? 'active' : ''}`} onClick={() => setTab('shap')}>
-                            🎯 SHAP Explanation
+                            🎯 SHAP
                         </button>
                         <button className={`tab ${tab === 'lime' ? 'active' : ''}`} onClick={() => setTab('lime')}>
-                            🟦 LIME Explanation
+                            🔬 LIME
+                        </button>
+                        <button className={`tab ${tab === 'compare' ? 'active' : ''}`} onClick={() => setTab('compare')}>
+                            ⚖️ Compare
                         </button>
                     </div>
 
                     {tab === 'shap' && (
                         <>
                             <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                                <strong style={{ color: 'var(--accent-light)' }}>SHAP (SHapley Additive Explanations)</strong> — Global method.
-                                Red bars push the prediction towards <em>Attack</em>, blue bars push towards <em>Benign</em>.
+                                <strong style={{ color: '#f87171' }}>SHAP (SHapley Additive Explanations)</strong> — Game-theory based, globally consistent.
+                                Computes exact contribution of each feature using Shapley values.
+                                <span style={{ color: '#f87171' }}> Red</span> = pushes toward <em>Attack</em>,
+                                <span style={{ color: '#67e8f9' }}> Blue</span> = pushes toward <em>Benign</em>.
+                                Values are <strong>additive</strong> — they sum to the final prediction score.
                             </div>
                             <SHAPWaterfall features={shapFeatures} />
                         </>
@@ -207,10 +378,23 @@ export default function AlertDetail() {
                     {tab === 'lime' && (
                         <>
                             <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                                <strong style={{ color: 'var(--info)' }}>LIME (Local Interpretable Model-Agnostic Explanations)</strong> — Local method.
-                                Shows which feature conditions contributed to this specific prediction.
+                                <strong style={{ color: '#a78bfa' }}>LIME (Local Interpretable Model-Agnostic Explanations)</strong> — Locally faithful, model-agnostic.
+                                Perturbs the input and fits a linear model around this specific instance.
+                                <span style={{ color: '#a78bfa' }}> Purple</span> = pushes toward <em>Attack</em>,
+                                <span style={{ color: '#34d399' }}> Green</span> = pushes toward <em>Benign</em>.
+                                Values are <strong>regression weights</strong> — showing local feature importance.
                             </div>
-                            <LIMEChart features={limeFeatures} />
+                            <LIMELollipop features={limeFeatures} />
+                        </>
+                    )}
+
+                    {tab === 'compare' && (
+                        <>
+                            <div style={{ marginBottom: 16, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                                <strong style={{ color: 'var(--accent-light)' }}>SHAP vs LIME Comparison</strong> — Cross-validation of explanations.
+                                When both methods agree on a feature's direction, the explanation is highly trustworthy.
+                            </div>
+                            <ComparisonView shapFeatures={shapFeatures} limeFeatures={limeFeatures} />
                         </>
                     )}
                 </div>
