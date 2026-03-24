@@ -85,7 +85,15 @@ function Sidebar({ capturing, setCapturing, alertCount }) {
 function AppLayout() {
   const [capturing, setCapturing] = useState(false);
   const [alertCount, setAlertCount] = useState(0);
-  const [pollingInterval, setPollingInterval] = useState(3);
+  const [pollingInterval, setPollingInterval] = useState(() => {
+    const saved = localStorage.getItem('threatxai_polling_interval');
+    return saved ? Number(saved) : 3;
+  });
+
+  // Persist polling interval to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('threatxai_polling_interval', String(pollingInterval));
+  }, [pollingInterval]);
 
   useEffect(() => {
     // Check capture status on load

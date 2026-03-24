@@ -263,7 +263,16 @@ def _run_inference(features: np.ndarray, src_ip: str, dst_ip: str,
         model = models.get(_default_model) or models.get("xgboost") or list(models.values())[0]
         model_type = _default_model if _default_model in models else list(models.keys())[0]
 
-        proba = model.predict_proba(features_scaled.reshape(1, -1))[0][1]
+        # Handle DNN (Keras Sequential) vs sklearn-style models
+        if model_type == "dnn" or not hasattr(model, 'predict_proba'):
+            # Keras models use .predict() which returns sigmoid/softmax output
+            raw = model.predict(features_scaled.reshape(1, -1), verbose=0)
+            if raw.shape[-1] == 1:
+                proba = float(raw[0][0])  # single sigmoid output
+            else:
+                proba = float(raw[0][1])  # softmax, take class 1
+        else:
+            proba = float(model.predict_proba(features_scaled.reshape(1, -1))[0][1])
         prediction = int(proba >= 0.5)
 
         alert_id = str(uuid.uuid4())
