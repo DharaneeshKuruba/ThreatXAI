@@ -1,0 +1,43 @@
+# Core ML
+numpy
+pandas
+scikit-learn
+xgboost
+imbalanced-learn
+
+# Deep Learning
+tensorflow
+keras
+
+# Explainability
+shap
+lime
+
+# Clustering (EDAC novelty)
+hdbscan
+scipy
+
+# Backend
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+python-multipart
+aiofiles
+
+# Packet Capture
+scapy
+
+# Visualization (for ML scripts)
+matplotlib
+seaborn
+plotly
+
+# Utilities
+joblib
+tqdm
+python-dotenv
+
+# Testing
+pytest
+httpx
