@@ -27,6 +27,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.error(f"Database setup failed: {e}")
     
+    # Apply persistent config
+    try:
+        from backend.services import capture_service
+        capture_service._default_model = _app_config.get("default_model", "xgboost")
+        
+        from backend.services.model_service import get_edac_engine
+        edac = get_edac_engine()
+        if edac:
+            edac.SIMILARITY_THRESHOLD = float(_app_config.get("edac_similarity_threshold", 0.80))
+        log.info("✓ Persistent configuration applied")
+    except Exception as e:
+        log.error(f"Failed to apply config: {e}")
+
     log.info("★ ThreatXAI API ready")
     yield
     log.info("ThreatXAI API shutting down")
@@ -89,11 +102,29 @@ async def model_metrics():
 
 
 # ─── Runtime Configuration ─────────────────────────────────────────────────────
+import json
+
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
 _app_config = {
     "default_model": "xgboost",
     "edac_similarity_threshold": 0.80,
     "max_alerts": 500,
 }
+
+if os.path.exists(CONFIG_FILE):
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            _app_config.update(json.load(f))
+    except Exception as e:
+        log.error(f"Failed to load config from JSON: {e}")
+
+def _save_config():
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(_app_config, f, indent=4)
+    except Exception as e:
+        log.error(f"Failed to save config to JSON: {e}")
 
 
 @app.get("/config", tags=["Configuration"])
@@ -129,6 +160,9 @@ async def update_config(updates: dict):
         cap = max(50, min(10000, cap))
         _app_config["max_alerts"] = cap
         changed["max_alerts"] = cap
+        
+    _save_config()
+    
     return {"status": "updated", "config": _app_config, "changed": changed}
 
 

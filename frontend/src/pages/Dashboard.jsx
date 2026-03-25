@@ -29,7 +29,7 @@ export default function Dashboard({ capturing, setAlertCount, pollingInterval = 
     const fetchAlerts = useCallback(async () => {
         try {
             const prediction = filter === 'attack' ? 1 : filter === 'benign' ? 0 : null;
-            const data = await getAlerts(0, 500, prediction);
+            const data = await getAlerts(0, 10000, prediction);
             setAlerts(data);
             setIsRealData(true);
             setAlertCount(data.filter(a => a.prediction === 1).length);

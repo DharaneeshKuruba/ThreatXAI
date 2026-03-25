@@ -45,7 +45,7 @@ async def predict(req: PredictRequest, db: Session = Depends(get_db)):
     else:
         proba = float(model.predict_proba(features_scaled.reshape(1, -1))[0][1])
 
-    prediction = int(proba >= 0.5)
+    prediction = int(proba >= 0.2)
     label = "Attack" if prediction == 1 else "Benign"
     alert_id = str(uuid.uuid4())
 
