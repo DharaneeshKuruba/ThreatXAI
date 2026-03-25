@@ -92,6 +92,7 @@ async def model_metrics():
 _app_config = {
     "default_model": "xgboost",
     "edac_similarity_threshold": 0.80,
+    "max_alerts": 500,
 }
 
 
@@ -123,6 +124,11 @@ async def update_config(updates: dict):
         except Exception:
             pass
         changed["edac_similarity_threshold"] = thresh
+    if "max_alerts" in updates:
+        cap = int(updates["max_alerts"])
+        cap = max(50, min(10000, cap))
+        _app_config["max_alerts"] = cap
+        changed["max_alerts"] = cap
     return {"status": "updated", "config": _app_config, "changed": changed}
 
 

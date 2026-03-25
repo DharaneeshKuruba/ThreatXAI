@@ -25,7 +25,7 @@ export const getGlobalSHAP = (modelType = 'xgboost') =>
     api.get(`/explain/global/shap?model_type=${modelType}`).then(r => r.data);
 
 // Alerts
-export const getAlerts = (skip = 0, limit = 50, prediction = null) => {
+export const getAlerts = (skip = 0, limit = 500, prediction = null) => {
     const params = { skip, limit };
     if (prediction !== null) params.prediction = prediction;
     return api.get('/alerts', { params }).then(r => r.data);
@@ -33,6 +33,9 @@ export const getAlerts = (skip = 0, limit = 50, prediction = null) => {
 
 export const getAlertDetail = (alertId) =>
     api.get(`/alerts/${alertId}`).then(r => r.data);
+
+export const deleteAlert = (alertId) =>
+    api.delete(`/alerts/${alertId}`).then(r => r.data);
 
 export const getAlertStats = () =>
     api.get('/alerts/stats/summary').then(r => r.data);

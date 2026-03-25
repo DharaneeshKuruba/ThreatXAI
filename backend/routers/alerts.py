@@ -13,16 +13,24 @@ from backend.schemas import AlertOut, SHAPFeature
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 # ─── Configuration ─────────────────────────────────────────────────────────────
-MAX_ALERTS = 500  # Maximum alerts to keep in DB. Oldest benign alerts purged first.
+
+def _get_max_alerts() -> int:
+    """Read max_alerts from runtime config (set via /config endpoint)."""
+    try:
+        from backend.main import _app_config
+        return int(_app_config.get("max_alerts", 500))
+    except Exception:
+        return 500
 
 
 def _enforce_alert_cap(db: Session):
-    """Purge oldest alerts when DB exceeds MAX_ALERTS. Benign alerts purged first."""
+    """Purge oldest alerts when DB exceeds the configured cap. Benign alerts purged first."""
+    max_alerts = _get_max_alerts()
     total = db.query(func.count(Alert.id)).scalar()
-    if total <= MAX_ALERTS:
+    if total <= max_alerts:
         return
 
-    excess = total - MAX_ALERTS
+    excess = total - max_alerts
 
     # Phase 1: delete oldest benign alerts
     benign_ids = (
@@ -56,7 +64,7 @@ def _enforce_alert_cap(db: Session):
 @router.get("", response_model=List[dict])
 async def get_alerts(
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, le=200),
+    limit: int = Query(500, le=10000),
     prediction: Optional[int] = None,
     db: Session = Depends(get_db)
 ):
@@ -98,6 +106,7 @@ async def get_alerts(
 
 @router.get("/stats/summary")
 async def alert_stats(db: Session = Depends(get_db)):
+    max_alerts = _get_max_alerts()
     total = db.query(func.count(Alert.id)).scalar()
     attacks = db.query(func.count(Alert.id)).filter(Alert.prediction == 1).scalar()
     benign = total - attacks
@@ -110,8 +119,8 @@ async def alert_stats(db: Session = Depends(get_db)):
         "benign": benign,
         "unique_clusters": clusters,
         "attack_rate": round(attacks / total, 3) if total > 0 else 0,
-        "max_alerts": MAX_ALERTS,
-        "storage_usage": f"{total}/{MAX_ALERTS}",
+        "max_alerts": max_alerts,
+        "storage_usage": f"{total}/{max_alerts}",
     }
 
 

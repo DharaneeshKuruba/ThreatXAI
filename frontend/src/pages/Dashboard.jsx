@@ -1,7 +1,7 @@
 // pages/Dashboard.jsx — Live monitoring feed
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { getAlerts, getAlertStats } from '../api/client';
+import { getAlerts, getAlertStats, deleteAlert } from '../api/client';
 
 function ConfidenceBar({ value }) {
     const pct = Math.round(value * 100);
@@ -21,6 +21,7 @@ export default function Dashboard({ capturing, setAlertCount, pollingInterval = 
     const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
     const [isRealData, setIsRealData] = useState(false);
+    const [deletingId, setDeletingId] = useState(null);
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
     const clusterFilter = searchParams.get('cluster');
@@ -28,7 +29,7 @@ export default function Dashboard({ capturing, setAlertCount, pollingInterval = 
     const fetchAlerts = useCallback(async () => {
         try {
             const prediction = filter === 'attack' ? 1 : filter === 'benign' ? 0 : null;
-            const data = await getAlerts(0, 100, prediction);
+            const data = await getAlerts(0, 500, prediction);
             setAlerts(data);
             setIsRealData(true);
             setAlertCount(data.filter(a => a.prediction === 1).length);
@@ -65,7 +66,26 @@ export default function Dashboard({ capturing, setAlertCount, pollingInterval = 
         return () => clearInterval(interval);
     }, [capturing, fetchAlerts, fetchStats, pollingInterval]);
 
+    const handleDeleteAlert = async (e, alertId) => {
+        e.stopPropagation();
+        if (deletingId) return;
+        setDeletingId(alertId);
+        try {
+            await deleteAlert(alertId);
+            setAlerts(prev => prev.filter(a => a.alert_id !== alertId));
+            fetchStats();
+        } catch {
+            // silently fail
+        } finally {
+            setDeletingId(null);
+        }
+    };
+
     const displayStats = stats || { total_alerts: 0, attacks: 0, benign: 0, unique_clusters: 0, attack_rate: 0 };
+
+    const filteredAlerts = alerts
+        .filter(a => filter === 'all' || (filter === 'attack' ? a.prediction === 1 : a.prediction === 0))
+        .filter(a => !clusterFilter || a.cluster_id === clusterFilter);
 
     return (
         <>
@@ -128,6 +148,9 @@ export default function Dashboard({ capturing, setAlertCount, pollingInterval = 
                             🚨 Alert Feed
                             {capturing && <span className="badge" style={{ background: 'var(--success-bg)', color: 'var(--success)', fontSize: 10, marginLeft: 8 }}>● LIVE</span>}
                             {clusterFilter && <span className="badge" style={{ background: 'rgba(139,92,246,0.15)', color: '#a78bfa', fontSize: 10, marginLeft: 8 }}>Campaign Filter</span>}
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 10, fontWeight: 400 }}>
+                                {filteredAlerts.length} alert{filteredAlerts.length !== 1 ? 's' : ''}
+                            </span>
                         </div>
                         <div className="tabs" style={{ marginBottom: 0 }}>
                             {['all', 'attack', 'benign'].map(f => (
@@ -164,14 +187,14 @@ export default function Dashboard({ capturing, setAlertCount, pollingInterval = 
                             </div>
                         </div>
                     ) : (
-                        <div className="table-wrapper" style={{ border: 'none', borderRadius: 0 }}>
+                        <div className="table-wrapper" style={{ border: 'none', borderRadius: 0, maxHeight: '70vh', overflowY: 'auto' }}>
                             <table className="alerts-table">
-                                <thead>
+                                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                                     <tr>
                                         <th>Time</th>
                                         <th>Source IP</th>
                                         <th>Destination IP</th>
-                                        <th>Proto</th>
+                                        <th>Protocol</th>
                                         <th>Status</th>
                                         <th>Confidence</th>
                                         <th>Campaign</th>
@@ -179,10 +202,7 @@ export default function Dashboard({ capturing, setAlertCount, pollingInterval = 
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {alerts
-                                        .filter(a => filter === 'all' || (filter === 'attack' ? a.prediction === 1 : a.prediction === 0))
-                                        .filter(a => !clusterFilter || a.cluster_id === clusterFilter)
-                                        .slice(0, 50).map(alert => (
+                                    {filteredAlerts.map(alert => (
                                         <tr key={alert.alert_id} onClick={() => navigate(`/alerts/${alert.alert_id}`)}>
                                             <td className="mono" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
                                                 {alert.timestamp ? new Date(alert.timestamp).toLocaleTimeString() : '—'}
@@ -204,10 +224,25 @@ export default function Dashboard({ capturing, setAlertCount, pollingInterval = 
                                                 ) : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>}
                                             </td>
                                             <td>
-                                                <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 11 }}
-                                                    onClick={e => { e.stopPropagation(); navigate(`/alerts/${alert.alert_id}`); }}>
-                                                    Explain →
-                                                </button>
+                                                <div style={{ display: 'flex', gap: 4 }}>
+                                                    <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 11 }}
+                                                        onClick={e => { e.stopPropagation(); navigate(`/alerts/${alert.alert_id}`); }}>
+                                                        Explain →
+                                                    </button>
+                                                    <button
+                                                        className="btn btn-ghost"
+                                                        style={{
+                                                            padding: '4px 8px', fontSize: 11,
+                                                            color: deletingId === alert.alert_id ? 'var(--text-muted)' : 'var(--danger)',
+                                                            opacity: deletingId === alert.alert_id ? 0.5 : 1,
+                                                        }}
+                                                        onClick={e => handleDeleteAlert(e, alert.alert_id)}
+                                                        disabled={deletingId === alert.alert_id}
+                                                        title="Delete this alert"
+                                                    >
+                                                        {deletingId === alert.alert_id ? '...' : '🗑️'}
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}

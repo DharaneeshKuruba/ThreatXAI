@@ -18,6 +18,9 @@ export default function Settings({ pollingInterval, setPollingInterval }) {
     const [savedModel, setSavedModel] = useState(false);
     const [loadingConfig, setLoadingConfig] = useState(true);
 
+    const [alertLimit, setAlertLimit] = useState(500);
+    const [savedAlertLimit, setSavedAlertLimit] = useState(false);
+
     // Load current config from backend on mount
     useEffect(() => {
         getConfig()
@@ -25,6 +28,7 @@ export default function Settings({ pollingInterval, setPollingInterval }) {
                 if (cfg.default_model) setSelectedModel(cfg.default_model);
                 if (cfg.edac_similarity_threshold != null)
                     setEdacThreshold(Math.round(cfg.edac_similarity_threshold * 100));
+                if (cfg.max_alerts != null) setAlertLimit(cfg.max_alerts);
             })
             .catch(() => {})
             .finally(() => setLoadingConfig(false));
@@ -48,6 +52,18 @@ export default function Settings({ pollingInterval, setPollingInterval }) {
             setTimeout(() => setSavedModel(false), 2500);
         } catch {
             alert('Failed to update model config');
+        }
+    };
+
+    const handleSaveAlertLimit = async () => {
+        try {
+            const clamped = Math.max(50, Math.min(10000, Number(alertLimit) || 500));
+            setAlertLimit(clamped);
+            await updateConfig({ max_alerts: clamped });
+            setSavedAlertLimit(true);
+            setTimeout(() => setSavedAlertLimit(false), 2500);
+        } catch {
+            alert('Failed to update alert limit');
         }
     };
 
@@ -145,6 +161,40 @@ export default function Settings({ pollingInterval, setPollingInterval }) {
                                 {savedModel && (
                                     <div style={{ padding: '8px 12px', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 8, fontSize: 12, color: 'var(--success)' }}>
                                         ✓ Model set to <strong>{MODEL_MAP[selectedModel]}</strong>, EDAC threshold set to <strong>{edacThreshold}%</strong>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Database Alert Limit */}
+                    <div className="card">
+                        <div className="card-title">📊 Database Alert Limit</div>
+                        {loadingConfig ? (
+                            <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 12 }}>Loading config...</div>
+                        ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                <div>
+                                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Max Alerts in Database</div>
+                                    <input
+                                        value={alertLimit}
+                                        onChange={e => setAlertLimit(e.target.value)}
+                                        type="number" min="50" max="10000" step="50"
+                                        style={inputStyle}
+                                    />
+                                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                                        Maximum number of alerts stored in the database (50–10,000).
+                                    </div>
+                                </div>
+                                <div style={{ padding: 10, background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.15)', borderRadius: 8, fontSize: 12, color: '#a78bfa' }}>
+                                    💡 When this limit is exceeded, the oldest <strong>benign</strong> alerts are purged first, then oldest attack alerts — ensuring recent attacks are always preserved.
+                                </div>
+                                <button className="btn btn-primary" style={{ marginTop: 4 }} onClick={handleSaveAlertLimit}>
+                                    {savedAlertLimit ? '✓ Saved!' : 'Save Alert Limit'}
+                                </button>
+                                {savedAlertLimit && (
+                                    <div style={{ padding: '8px 12px', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 8, fontSize: 12, color: 'var(--success)' }}>
+                                        ✓ Alert limit updated to <strong>{alertLimit}</strong>
                                     </div>
                                 )}
                             </div>
